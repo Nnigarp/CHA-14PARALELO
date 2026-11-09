@@ -1,13 +1,30 @@
 #!/usr/bin/env python3
-"""Challenge 14: Concurrent Bank Transfers with Deadlock Prevention.
+"""UNIVERSIDAD TECNOLÓGICA DE BOLÍVAR (UTB)
+Curso: Computación en Paralelo (ISCO-A08A)
+Docente: Juan Carlos Martínez
+Estudiante: Nilver García Pimentel
+Reto: Challenge 14 — Concurrent Bank Transfers with Deadlock Prevention
 
-Un solo archivo ejecutable con Python 3.9+ (standard library).
-Los conceptos técnicos se conservan en inglés; explicación y consola en español.
+OBJETIVO
+Simular transferencias bancarias concurrentes con Thread y Lock por cuenta,
+garantizando la conservación del dinero y previniendo Deadlock mediante
+Global Lock Ordering (orden ascendente de identificador de cuenta).
+
+EJECUCIÓN
+Este archivo .txt contiene código Python autónomo (Python 3.9+, standard library).
+Se ejecuta directamente desde una terminal; no requiere otros archivos.
 
 Ejemplos:
-    python Challenge14_Nilver_Garcia_Pimentel.py --help
-    python Challenge14_Nilver_Garcia_Pimentel.py --accounts 10 --balance 1000 --transfers 100 --max-amount 100
-    python Challenge14_Nilver_Garcia_Pimentel.py --experiments --repetitions 5
+  python Challenge14_Nilver_Garcia_Pimentel.txt --help
+  python Challenge14_Nilver_Garcia_Pimentel.txt --accounts 10 --balance 1000 --transfers 100 --max-amount 100
+  python Challenge14_Nilver_Garcia_Pimentel.txt --accounts 2 --balance 0 --transfers 16 --logs
+  python Challenge14_Nilver_Garcia_Pimentel.txt --experiments --repetitions 5
+
+NOTA DE INGENIERÍA
+Los Threads no garantizan ocupar todos los cores físicos. La referencia
+Serial Replay valida el historial realmente ejecutado (linearizabilidad);
+con fondos insuficientes, un orden Serial fijo puede diferir del concurrente.
+Las respuestas a las cinco preguntas de reflexión están al final del código.
 """
 import argparse
 import os
@@ -252,7 +269,8 @@ def experiments(args):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--accounts", type=int, default=10, help="número de cuentas (>=2)")
     parser.add_argument("--balance", type=int, default=1000, help="saldo inicial de cada cuenta (>=0)")
     parser.add_argument("--transfers", type=int, default=max(2, os.cpu_count() or 2),
@@ -277,19 +295,42 @@ def main():
     return 0 if passed else 1
 
 
-# REFLECTION QUESTIONS (respuestas exigidas como comentarios en el código)
-# 1. Las cuatro condiciones de Coffman son Mutual Exclusion, Hold and Wait,
-#    No Preemption y Circular Wait. Deben coexistir para producir Deadlock.
-# 2. Se usa Global Lock Ordering: dos cuentas se bloquean por uid ascendente,
-#    aunque la transferencia se haga en sentido inverso. Esto elimina Circular Wait.
-# 3. Un único Global Lock mantiene Correctness pero impide transferencias
-#    independientes simultáneas, aumentando innecesariamente Contention.
-# 4. Más Threads pueden aumentar Context Switching, Thread Scheduling Overhead
-#    y Lock Contention. En CPython tradicional el GIL limita trabajo CPU-bound;
-#    crear Threads no demuestra utilización de todos los cores.
-# 5. Para más de dos cuentas se ordenarían TODOS sus Lock por uid, se validarían
-#    las condiciones antes de modificar saldos y se liberarían con context managers.
-#    Para persistencia real harían falta rollback y Atomic Transactions.
+# ============================================================================
+# PREGUNTAS DE REFLEXIÓN — Challenge 14 (respuestas en comentarios)
+# ============================================================================
+# 1. ¿Cuáles son las condiciones necesarias para que ocurra un Deadlock?
+#    Las cuatro condiciones de Coffman deben coexistir:
+#    (a) Mutual Exclusion: un recurso no se comparte mientras está bloqueado;
+#    (b) Hold and Wait: un Thread conserva un Lock mientras espera otro;
+#    (c) No Preemption: no se retira por la fuerza un Lock ya adquirido;
+#    (d) Circular Wait: existe un ciclo de Threads que esperan recursos
+#        retenidos por otros Threads del mismo ciclo.
+#
+# 2. ¿Qué estrategia de Deadlock Prevention implementaste y por qué funciona?
+#    Global Lock Ordering. Los dos Locks de una transferencia se adquieren
+#    siempre por uid ascendente, independientemente de la dirección del dinero.
+#    Esta disciplina impide Circular Wait, por lo que no se forma Deadlock
+#    entre los Locks de cuentas usados en las transferencias.
+#
+# 3. ¿Por qué un único Global Lock es correcto, pero potencialmente ineficiente?
+#    Garantiza Mutual Exclusion en todas las cuentas, pero serializa también
+#    transferencias entre pares de cuentas independientes. Esto aumenta la
+#    Contention y reduce la concurrencia disponible frente a un Lock por cuenta.
+#
+# 4. ¿Cómo afecta aumentar el número de Threads concurrentes?
+#    Puede mejorar la concurrencia hasta cierto punto, pero también aumenta
+#    Thread Creation Overhead, Context Switching y Lock Contention. No se
+#    garantiza mayor Throughput; en CPython tradicional el GIL limita la
+#    ejecución paralela de trabajo CPU-bound con threading.
+#
+# 5. ¿Qué desafíos aparecerían si una transferencia involucrara más de dos
+#    cuentas?
+#    Habría que adquirir TODOS los Locks involucrados por uid ascendente,
+#    comprobar previamente fondos y restricciones, y efectuar el movimiento
+#    completo de forma atómica antes de liberar los Locks. En sistemas con
+#    persistencia serían necesarias estrategias de rollback/Atomic Transactions.
+#    Este orden evita Circular Wait, pero no garantiza Fairness o ausencia de
+#    Starvation; Python Lock no promete orden FIFO de adquisición.
 #
 # CONDICIONES TRANSVERSALES DE LOS RETOS:
 # - Cores: detectados con os.cpu_count(); el modo default y experimentos
