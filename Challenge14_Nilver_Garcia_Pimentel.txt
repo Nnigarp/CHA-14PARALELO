@@ -197,36 +197,72 @@ def run_case(num_accounts, initial_balance, operations, max_amount, seed,
     wait_times = [result.wait_ns / 1e6 for result in results
                   if result.status in ("OK", "FONDOS_INSUFICIENTES")]
     cores = os.cpu_count() or 1
-    print(f"\n=== {title} ===")
-    print(f"cores_detectados={cores} threads_creados={len(workers)} "
-          f"operaciones={operations} cuentas={num_accounts} balance={initial_balance} "
-          f"max_amount={max_amount} seed={seed}")
-    print("nota_cores: os.cpu_count() detecta CPUs lógicas, no mide su utilización; "
-          "el GIL puede limitar el paralelismo CPU-bound")
+    width = 68
+    print("\n" + "=" * width)
+    print("UTB | COMPUTACIÓN EN PARALELO | CHALLENGE 14")
+    print("Concurrent Bank Transfers with Deadlock Prevention")
+    print(f"Escenario: {title}")
+    print("=" * width)
+
+    print("\n[1] CONFIGURACIÓN")
+    print(f"  Cuentas:                         {num_accounts}")
+    print(f"  Saldo inicial por cuenta:        {initial_balance}")
+    print(f"  Transferencias solicitadas:     {operations}")
+    print(f"  Threads creados:                {len(workers)}")
+    print(f"  CPUs lógicas detectadas:        {cores}")
+    print(f"  Monto máximo por transferencia: {max_amount}")
+    print(f"  Semilla (seed):                 {seed}")
+    print("  Nota: el número de Threads no acredita uso simultáneo de cores; "
+          "el GIL puede limitar trabajo CPU-bound.")
+
+    print("\n[2] EJECUCIÓN DE TRANSFERENCIAS")
     if logs:
+        print("  Log individual de operaciones:")
         for task, result in zip(tasks, results):
-            print(f"T{task.uid:05d} origen=A{task.source} destino=A{task.target} "
+            print(f"  T{task.uid:05d} origen=A{task.source} destino=A{task.target} "
                   f"monto={task.amount} estado={result.status} "
                   f"lock_wait_ms={result.wait_ns / 1e6:.6f}" +
                   (f" error={result.error}" if result.error else ""))
-    print(f"transferencias: realizadas={counts['OK']} "
-          f"rechazadas={counts['FONDOS_INSUFICIENTES']} "
-          f"errores={counts['ERROR']} no_iniciadas={counts['NO_INICIADA']}")
-    print(f"dinero_inicial={num_accounts * initial_balance} dinero_final={sum(balances)}")
-    print(f"tiempo_s={elapsed:.6f} throughput_intentos_s={operations / elapsed:.2f}")
-    print(f"lock_wait_mediana_ms={statistics.median(wait_times) if wait_times else 0:.6f} "
-          f"lock_wait_max_ms={max(wait_times, default=0):.6f}")
-    print("referencia_serial: mismo workload, mismo saldo inicial, "
-          "replay de todos los intentos en orden de linearizacion")
-    print(f"serial_orden_uid: saldos_y_estados_iguales={'SI' if fixed_order_match else 'NO'} "
-          "(informativo: el orden concurrente puede variar con fondos insuficientes)")
-    for name, passed in checks.items():
-        print(f"{name}: {'PASS' if passed else 'FAIL'}")
+    else:
+        print("  Logs individuales: ocultos (usar --logs para mostrarlos)")
+    print(f"  Intentadas:                     {operations}")
+    print(f"  Exitosas:                       {counts['OK']}")
+    print(f"  Rechazadas por fondos:          {counts['FONDOS_INSUFICIENTES']}")
+    print(f"  Errores:                        {counts['ERROR']}")
+    print(f"  No iniciadas:                   {counts['NO_INICIADA']}")
+
+    print("\n[3] INTEGRIDAD BANCARIA")
+    print(f"  Dinero inicial:                 {num_accounts * initial_balance}")
+    print(f"  Dinero final:                   {sum(balances)}")
+    for name in ("conservacion_dinero", "saldos_no_negativos", "auditoria_por_cuenta",
+                 "todos_los_threads_finalizaron", "operaciones_contabilizadas", "sin_excepciones"):
+        print(f"  {name}: {'PASS' if checks[name] else 'FAIL'}")
+
+    print("\n[4] SINCRONIZACIÓN Y DEADLOCK PREVENTION")
+    print("  Estrategia: Global Lock Ordering (uid ascendente)")
+    print("  Locks: uno independiente por cuenta; Circular Wait prevenido por diseño")
+    print(f"  historial_completo: {'PASS' if checks['historial_completo'] else 'FAIL'}")
+
+    print("\n[5] VALIDACIÓN SERIAL / PARALLEL")
+    print("  Referencia: Serial Replay de los mismos intentos, montos y saldo inicial")
+    print("  Orden: historial de linearización de la ejecución Parallel")
+    print(f"  serial_parallel_igualdad: {'PASS' if checks['serial_parallel_igualdad'] else 'FAIL'}")
+    print("  Serial independiente por uid: " + ("IGUAL" if fixed_order_match else "DIFERENTE"))
+    print("  Nota: un orden fijo por uid puede diferir si faltan fondos; "
+          "no invalida un historial linearizable.")
+
+    print("\n[6] RENDIMIENTO")
+    print(f"  Tiempo total (incluye creación de Threads): {elapsed:.6f} s")
+    print(f"  Throughput (intentos/s):                 {operations / elapsed:.2f}")
+    print(f"  Espera mediana por Locks:                "
+          f"{statistics.median(wait_times) if wait_times else 0:.6f} ms")
+    print(f"  Espera máxima por Locks:                 {max(wait_times, default=0):.6f} ms")
     if start_error:
-        print(f"error_creacion_threads={start_error}")
-    print("deadlock_prevention: Global Lock Ordering (uid ascendente), sin Circular Wait")
+        print(f"  error_creacion_threads: {start_error}")
     passed = all(checks.values())
-    print(f"RESULTADO: {'PASS' if passed else 'FAIL'}")
+    print("\n" + "=" * width)
+    print(f"RESULTADO FINAL: {'PASS' if passed else 'FAIL'}")
+    print("=" * width)
     return passed, elapsed, operations / elapsed
 
 
@@ -240,10 +276,13 @@ def experiments(args):
                  ("High Contention", 2, small_threads),
                  ("Low Contention", max(100, cores), large_threads),
                  ("High Contention", 2, large_threads)]
-    print(f"CONTROL_EXPERIMENTAL: balance_fijo={args.balance} "
-          f"max_amount_fijo={args.max_amount} seeds={args.seed}.."
-          f"{args.seed + args.repetitions - 1}; "
-          "Serial replay valida incluso transferencias rechazadas")
+    print("\n" + "=" * 68)
+    print("EVALUACIÓN EXPERIMENTAL | LOW / HIGH CONTENTION")
+    print("=" * 68)
+    print(f"  Balance fijo por cuenta: {args.balance}")
+    print(f"  Monto máximo fijo:       {args.max_amount}")
+    print(f"  Semillas:                {args.seed}..{args.seed + args.repetitions - 1}")
+    print("  Serial Replay comprueba también transferencias rechazadas.")
     everything_ok = True
     for label, num_accounts, operations in scenarios:
         times, throughputs = [], []
@@ -256,15 +295,18 @@ def experiments(args):
             everything_ok = everything_ok and ok
             times.append(elapsed)
             throughputs.append(throughput)
-        print(f"RESUMEN {label} cuentas={num_accounts} threads={operations} "
-              f"repeticiones={args.repetitions} mediana_s={statistics.median(times):.6f} "
-              f"min_s={min(times):.6f} max_s={max(times):.6f} "
-              f"throughput_mediano={statistics.median(throughputs):.2f}")
-    print("ANALISIS: más Threads no implican mayor Throughput. Los tiempos incluyen "
-          "Thread Creation Overhead y registro de auditoria; GIL y Thread Scheduling "
-          "afectan las mediciones. Lock Ordering previene Deadlock, pero no "
-          "garantiza Fairness ni Starvation-freedom.")
+        print(f"\nRESUMEN | {label} | {num_accounts} cuentas | {operations} Threads")
+        print(f"  Repeticiones:          {args.repetitions}")
+        print(f"  Tiempo mediano:        {statistics.median(times):.6f} s")
+        print(f"  Tiempo mínimo/máximo:  {min(times):.6f} / {max(times):.6f} s")
+        print(f"  Throughput mediano:    {statistics.median(throughputs):.2f} intentos/s")
+    print("\nANÁLISIS: más Threads no implican mayor Throughput. Las mediciones incluyen")
+    print("  Thread Creation Overhead y el registro de auditoría; GIL y Thread Scheduling")
+    print("  afectan los tiempos. Lock Ordering previene Deadlock, pero no garantiza")
+    print("  Fairness ni Starvation-freedom.")
+    print("=" * 68)
     print(f"RESULTADO GLOBAL EXPERIMENTOS: {'PASS' if everything_ok else 'FAIL'}")
+    print("=" * 68)
     return 0 if everything_ok else 1
 
 
